@@ -6,6 +6,7 @@ namespace MemberPressMultiSiteRoles;
 class Main {
 	const MEMBER_PRESS_POST_TYPE = 'memberpressproduct';
 	const MEMBER_PRESS_ROLES_META_KEY = '_mepruserroles_roles';
+	const MENU_SLUG = 'memberpress-multisite-roles';
 
 
 	public function __construct() {
@@ -43,7 +44,7 @@ class Main {
 			'MemberPress MultiSite Roles Options',
 			'MemberPress Roles',
 			'manage_options',
-			'memberpress-multisite-roles',
+			self::MENU_SLUG,
 			[Options::class, 'show']
 		);
 	}
@@ -60,5 +61,19 @@ class Main {
 		}
 
 		return $productsAndRoles;
+	}
+
+	public static function getRolesForMultiSite(int $multiSiteId): array {
+		$currentSiteId = get_current_blog_id();
+
+		if ($currentSiteId === $multiSiteId) {
+			return get_editable_roles();
+		}
+
+		switch_to_blog($multiSiteId);
+		$roles = get_editable_roles();
+		switch_to_blog($currentSiteId);
+
+		return $roles;
 	}
 }

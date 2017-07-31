@@ -13,6 +13,8 @@ class Options {
 
 
 	public static function show() {
+		self::handleOptionsSave();
+
 		$rolesMapping = get_option(self::ROLES_MAPPING_KEY);
 
 		print('<div class="wrap">');
@@ -24,8 +26,9 @@ class Options {
 			return;
 		}
 
-		print('<form method="post" action="options.php">');
+		vprintf('<form method="post" action="%s">', [menu_page_url(Main::MENU_SLUG, false)]);
 
+		/** @var \WP_Site[] $multiSites */
 		$multiSites = \get_sites();
 
 		foreach (Main::getMemberPressProductRoles() as $memberPressProductId => $roles) {
@@ -33,9 +36,37 @@ class Options {
 			vprintf('<h3>%s</h3>', [$memberPressProduct->post_title]);
 
 			foreach ($roles as $role) {
-				var_dump($role);
+				vprintf('<h4>Configure role `%s` from the main site</h4>', [$role]);
+
 				foreach ($multiSites as $multiSite) {
-					var_dump($multiSite);
+					if ($multiSite->id === 1) {
+						continue;
+					}
+
+					$options = [];
+					foreach (Main::getRolesForMultiSite($multiSite->id) as $subSiteRole => $roleData) {
+						$options[] = vsprintf(
+							'<option value="%1$s"%2$s>%1$s</option>',
+							[
+								$subSiteRole,
+								(isset($rolesMapping[$memberPressProductId][$role][$multiSite->id]) && $rolesMapping[$memberPressProductId][$role][$multiSite->id] === $subSiteRole) ?
+									' selected' :
+									''
+							]
+						);
+					}
+
+					vprintf(
+						'<label>Select role from `%s` <select name="%s[%d][%s][%d]"><option value="">No role</option>%s</select></label><br/>',
+						[
+							$multiSite->blogname,
+							self::ROLES_MAPPING_KEY,
+							$memberPressProductId,
+							$role,
+							$multiSite->id,
+							implode('', $options),
+						]
+					);
 				}
 			}
 		}
@@ -43,6 +74,43 @@ class Options {
 		submit_button();
 		print('</form>');
 		print('</div>');
+	}
+
+	protected static function handleOptionsSave() {
+		if (!isset($_POST, $_POST[self::ROLES_MAPPING_KEY])) {
+			return;
+		}
+
+		if (!is_array($_POST[self::ROLES_MAPPING_KEY])) {
+			print(self::getNoticeHtml('No valid role mapping!', self::NOTICE_TYPE_ERROR));
+			return;
+		}
+
+		$mapping = $_POST[self::ROLES_MAPPING_KEY];
+
+		foreach ($mapping as $memberPressProductId => $roles) {
+			if (!is_array($roles)) {
+				print(self::getNoticeHtml(vsprintf('Invalid roles for product `%s`, entry removed.', [$memberPressProductId]), self::NOTICE_TYPE_WARNING));
+				unset($mapping[$memberPressProductId]);
+				continue;
+			}
+
+			foreach ($roles as $role => $multiSites) {
+				if (!is_array($multiSites)) {
+					print(self::getNoticeHtml(vsprintf('Invalid multi sites for product `%s` with role `%s`, entry removed.', [$memberPressProductId, $role]), self::NOTICE_TYPE_WARNING));
+					unset($mapping[$memberPressProductId][$role]);
+					continue;
+				}
+
+				foreach ($multiSites as $multiSiteId => $multiSiteRole) {
+					if ($multiSiteRole === '' || !is_string($multiSiteRole)) {
+						unset($mapping[$memberPressProductId][$role][$multiSiteId]);
+						continue;
+					}
+				}
+			}
+		}
+		update_option(self::ROLES_MAPPING_KEY, $mapping);
 	}
 
 	public static function getNoticeHtml(string $message, string $noticeType = self::NOTICE_TYPE_INFO, bool $isDismissable = false): string {
