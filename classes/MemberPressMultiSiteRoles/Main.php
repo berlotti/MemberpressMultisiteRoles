@@ -14,29 +14,91 @@ class Main {
 	}
 
 	public function initialize() {
-		add_action('mepr-signup', [$this, 'signup']);
-		add_action('mepr-transaction-expired', [$this, 'checkValidMemberRoles']);
+		// Fire on same events as MemberPress User Roles, just later
+		add_action('mepr-txn-store', [$this, 'updateRoles'], 99);
+		add_action('mepr-transaction-expired', [$this, 'updateRoles'], 99);
 
 		if (is_admin()) {
 			add_action('admin_menu', [$this, 'addOptionsMenu']);
 		}
 	}
 
-	public function signup(\MeprTransaction $transaction) {
-		// TODO: set the correct role for the multisites for this membership
-		if (!$transaction->is_active()) {
+	public function updateRoles(\MeprTransaction $transaction) {
+		$user = get_user_by('id', $transaction->user_id);
+		if ($user === false) {
 			return;
 		}
 
-		$product = $transaction->product();
-		// TODO: Match product with role mapping
-		$memberShipPost = $product->get_attrs();
-		$roles = get_post_meta($memberShipPost['ID'], self::MEMBER_PRESS_ROLES_META_KEY, true);
+		if (!function_exists('get_sites')) {
+			return;
+		}
 
+		$rolesMapping = get_option(Options::ROLES_MAPPING_KEY);
+		$product = $transaction->product();
+		$isActive = $transaction->is_active();
+
+		if (!isset($rolesMapping[$product->ID])) {
+			return;
+		}
+
+		$productMapping = $rolesMapping[$product->ID];
+
+		/** @var \WP_Site $blog */
+		foreach (\get_sites() as $blog) {
+			if ($blog->id === 1) {
+				continue;
+			}
+
+			if ($isActive) {
+				foreach ($user->roles as $role) {
+					if (!isset($productMapping[$role][$blog->id])) {
+						continue;
+					}
+
+					$this->addRoleToBlog($user, $blog->id, $productMapping[$role][$blog->id]);
+				}
+				continue;
+			}
+
+			foreach ($productMapping as $role => $blogIds) {
+				if (!isset($blogIds[$blog->id])) {
+					continue;
+				}
+				$this->removeRoleFromBlog($user, $blog->id, $blogIds[$blog->id]);
+			}
+		}
 	}
 
-	public function expired(\MeprTransaction $transaction, string $subscriptionStatus) {
-		// TODO: set the correct role for the multisites for this membership
+	protected function addRoleToBlog(\WP_User $user, int $blogId, string $role) {
+		$key = vsprintf('wp_%d_capabilities', [$blogId]);
+		$roles = get_user_meta($user->ID, $key, true);
+		if (in_array($role, $roles)) {
+			return;
+		}
+		$roles[] = $role;
+		$roles[$role] = true;
+		update_user_meta($user->ID, $key, $roles);
+	}
+
+	protected function removeRoleFromBlog(\WP_User $user, int $blogId, string $role) {
+		$key = vsprintf('wp_%d_capabilities', [$blogId]);
+		$roles = get_user_meta($user->ID, $key, true);
+
+		if ($roles === '') {
+			return;
+		}
+
+		$index = array_search($role, $roles);
+		if ($index === false) {
+			return;
+		}
+		unset($roles[$index]);
+		unset($roles[$role]);
+		if (count($roles) === 0) {
+			delete_user_meta($user->ID, $key);
+		} else {
+			update_user_meta($user->ID, $key, $roles);
+		}
 	}
 
 	public function addOptionsMenu() {
