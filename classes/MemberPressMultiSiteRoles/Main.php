@@ -72,6 +72,9 @@ class Main {
 	protected function addRoleToBlog(\WP_User $user, int $blogId, string $role) {
 		$key = vsprintf('wp_%d_capabilities', [$blogId]);
 		$roles = get_user_meta($user->ID, $key, true);
+		if ($roles === '') {
+			$roles = [];
+		}
 		if (in_array($role, $roles)) {
 			return;
 		}
